@@ -6,29 +6,89 @@ import SwiftUI
 /// pas des mesures validées d'un Nissan Qashqai.
 @Observable
 final class ProjectModel {
-    var vehicleName = "Nissan Qashqai — à préciser" { didSet { persist() } }
-    var useCase = "Ranger mon matériel de travail" { didSet { persist() } }
-    var seatsFolded = true { didSet { persist() } }
-    var width = 1_050.0 { didSet { persist() } }
-    var length = 900.0 { didSet { persist() } }
-    var height = 320.0 { didSet { persist() } }
+    private(set) var currentProjectID: UUID?
+    private(set) var projects: [ProjectSummary] = []
+    var projectName = "" { didSet { persist() } }
+    var vehicleName = "" { didSet { persist() } }
+    var useCase = "" { didSet { persist() } }
+    var seatsFolded = false { didSet { persist() } }
+    var width = 0.0 { didSet { persist() } }
+    var length = 0.0 { didSet { persist() } }
+    var height = 0.0 { didSet { persist() } }
     var thickness = 15.0 { didSet { persist() } }
     var materialName = "Contreplaqué bouleau" { didSet { persist() } }
-    var dividerCount = 1 { didSet { persist() } }
+    var dividerCount = 0 { didSet { persist() } }
     var scanFileURL: URL? { didSet { persist() } }
     var scanBounds: ScanBounds? { didSet { persist() } }
     var scanDate: Date? { didSet { persist() } }
     var measurementsConfirmed = false { didSet { persist() } }
     var scanMeasurements: [String: [Double]] = [:] { didSet { persist() } }
-    var openings: [OpeningFeature] = [OpeningFeature.defaultDrawer] { didSet { persist() } }
+    var openings: [OpeningFeature] = [] { didSet { persist() } }
     var vehicleLandmarks: [VehicleLandmark] = [] { didSet { persist() } }
     var scanQuality: ScanQuality? { didSet { persist() } }
+    private var savedProjects: [SavedProject] = []
+    private var isHydrating = false
 
     init() {
-        guard let data = try? Data(contentsOf: Self.projectFile),
-              let saved = try? JSONDecoder().decode(SavedProject.self, from: data) else { return }
+        if let data = try? Data(contentsOf: Self.archiveFile),
+           let archive = try? JSONDecoder().decode(ProjectArchive.self, from: data) {
+            savedProjects = archive.projects
+            projects = archive.projects.map(ProjectSummary.init)
+            if let activeID = archive.activeProjectID,
+               let active = archive.projects.first(where: { $0.id == activeID }) {
+                currentProjectID = activeID
+                hydrate(active)
+            }
+        }
+        clearLegacyExampleStore()
+    }
+
+    var hasActiveProject: Bool { currentProjectID != nil }
+
+    func createProject(named name: String) {
+        persist()
+        let cleanName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let record = SavedProject(id: UUID(), projectName: cleanName.isEmpty ? "Nouveau projet" : cleanName,
+            updatedAt: .now, vehicleName: "", useCase: "", seatsFolded: false,
+            width: 0, length: 0, height: 0, thickness: 15,
+            materialName: "Contreplaqué bouleau", dividerCount: 0,
+            scanFileURL: nil, scanBounds: nil, scanDate: nil, measurementsConfirmed: false,
+            scanMeasurements: [:], openings: [], vehicleLandmarks: [], scanQuality: nil)
+        savedProjects.append(record)
+        currentProjectID = record.id
+        hydrate(record)
+        writeArchive()
+    }
+
+    func openProject(_ id: UUID) {
+        persist()
+        guard let record = savedProjects.first(where: { $0.id == id }) else { return }
+        currentProjectID = id
+        hydrate(record)
+        writeArchive()
+    }
+
+    func saveCurrentProject() {
+        persist()
+    }
+
+    func deleteProject(_ id: UUID) {
+        guard let record = savedProjects.first(where: { $0.id == id }) else { return }
+        if let scanURL = record.scanFileURL { removeScanFileIfOwned(scanURL) }
+        savedProjects.removeAll { $0.id == id }
+        projects = savedProjects.map(ProjectSummary.init)
+        if currentProjectID == id {
+            currentProjectID = nil
+            resetToEmptyProject()
+        }
+        writeArchive()
+    }
+
+    private func hydrate(_ saved: SavedProject) {
+        isHydrating = true
+        projectName = saved.projectName
         vehicleName = saved.vehicleName
-        useCase = saved.useCase ?? "Ranger mon matériel de travail"
+        useCase = saved.useCase
         seatsFolded = saved.seatsFolded
         width = saved.width
         length = saved.length
@@ -41,9 +101,33 @@ final class ProjectModel {
         scanDate = saved.scanDate
         measurementsConfirmed = saved.measurementsConfirmed
         scanMeasurements = saved.scanMeasurements
-        openings = saved.openings ?? [.defaultDrawer]
-        vehicleLandmarks = saved.vehicleLandmarks ?? []
+        openings = saved.openings
+        vehicleLandmarks = saved.vehicleLandmarks
         scanQuality = saved.scanQuality
+        isHydrating = false
+    }
+
+    private func resetToEmptyProject() {
+        isHydrating = true
+        projectName = ""
+        vehicleName = ""
+        useCase = ""
+        seatsFolded = false
+        width = 0
+        length = 0
+        height = 0
+        thickness = 15
+        materialName = "Contreplaqué bouleau"
+        dividerCount = 0
+        scanFileURL = nil
+        scanBounds = nil
+        scanDate = nil
+        measurementsConfirmed = false
+        scanMeasurements = [:]
+        openings = []
+        vehicleLandmarks = []
+        scanQuality = nil
+        isHydrating = false
     }
 
     func applyScan(fileURL: URL, bounds: ScanBounds, quality: ScanQuality) {
@@ -158,29 +242,74 @@ final class ProjectModel {
         }
     }
 
-    private static var projectFile: URL {
-        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("projet-amenagement.json")
+    private static var archiveFile: URL {
+        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("projets-amenagement.json")
     }
 
     private func persist() {
-        let saved = SavedProject(vehicleName: vehicleName, useCase: useCase, seatsFolded: seatsFolded,
-                                 width: width, length: length, height: height,
-                                 thickness: thickness, materialName: materialName,
-                                 dividerCount: dividerCount, scanFileURL: scanFileURL,
-                                 scanBounds: scanBounds, scanDate: scanDate,
-                                 measurementsConfirmed: measurementsConfirmed,
-                                 scanMeasurements: scanMeasurements,
-                                 openings: openings,
-                                 vehicleLandmarks: vehicleLandmarks,
-                                 scanQuality: scanQuality)
-        guard let data = try? JSONEncoder().encode(saved) else { return }
-        try? data.write(to: Self.projectFile, options: .atomic)
+        guard !isHydrating, let id = currentProjectID,
+              let index = savedProjects.firstIndex(where: { $0.id == id }) else { return }
+        savedProjects[index] = SavedProject(id: id, projectName: projectName, updatedAt: .now,
+            vehicleName: vehicleName, useCase: useCase, seatsFolded: seatsFolded,
+            width: width, length: length, height: height, thickness: thickness,
+            materialName: materialName, dividerCount: dividerCount, scanFileURL: scanFileURL,
+            scanBounds: scanBounds, scanDate: scanDate, measurementsConfirmed: measurementsConfirmed,
+            scanMeasurements: scanMeasurements, openings: openings,
+            vehicleLandmarks: vehicleLandmarks, scanQuality: scanQuality)
+        projects = savedProjects.map(ProjectSummary.init)
+        writeArchive()
+    }
+
+    private func writeArchive() {
+        let data = ProjectArchive(projects: savedProjects, activeProjectID: currentProjectID)
+        guard let encoded = try? JSONEncoder().encode(data) else { return }
+        try? encoded.write(to: Self.archiveFile, options: .atomic)
+    }
+
+    private func clearLegacyExampleStore() {
+        let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let legacyURL = documents.appendingPathComponent("projet-amenagement.json")
+        if let data = try? Data(contentsOf: legacyURL),
+           let legacy = try? JSONDecoder().decode(LegacyProjectMarker.self, from: data),
+           let scanURL = legacy.scanFileURL {
+            removeScanFileIfOwned(scanURL)
+        }
+        try? FileManager.default.removeItem(at: legacyURL)
+    }
+
+    private func removeScanFileIfOwned(_ url: URL) {
+        let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].standardizedFileURL
+        let candidate = url.standardizedFileURL
+        guard candidate.path.hasPrefix(documents.path + "/") else { return }
+        try? FileManager.default.removeItem(at: candidate)
     }
 }
 
-private struct SavedProject: Codable {
+struct ProjectSummary: Identifiable {
+    let id: UUID
+    let projectName: String
     let vehicleName: String
-    let useCase: String?
+    let updatedAt: Date
+
+    fileprivate init(_ saved: SavedProject) {
+        id = saved.id
+        projectName = saved.projectName
+        vehicleName = saved.vehicleName
+        updatedAt = saved.updatedAt
+    }
+}
+
+private struct ProjectArchive: Codable {
+    var projects: [SavedProject]
+    var activeProjectID: UUID?
+}
+
+private struct SavedProject: Codable, Identifiable {
+    let id: UUID
+    let projectName: String
+    let updatedAt: Date
+    let vehicleName: String
+    let useCase: String
     let seatsFolded: Bool
     let width, length, height, thickness: Double
     let materialName: String
@@ -190,9 +319,13 @@ private struct SavedProject: Codable {
     let scanDate: Date?
     let measurementsConfirmed: Bool
     let scanMeasurements: [String: [Double]]
-    let openings: [OpeningFeature]?
-    let vehicleLandmarks: [VehicleLandmark]?
+    let openings: [OpeningFeature]
+    let vehicleLandmarks: [VehicleLandmark]
     let scanQuality: ScanQuality?
+}
+
+private struct LegacyProjectMarker: Decodable {
+    let scanFileURL: URL?
 }
 
 enum VehicleLandmarkKind: String, CaseIterable, Codable, Identifiable {

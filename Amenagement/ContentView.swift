@@ -12,193 +12,150 @@ struct ContentView: View {
     @State private var selectedTab: AppTab = .project
 
     var body: some View {
-        TabView(selection: $selectedTab) {
-            NavigationStack {
-                ProjectHomeView(project: project) { selectedTab = .scan }
+        Group {
+            if project.hasActiveProject {
+                TabView(selection: $selectedTab) {
+                    NavigationStack { ProjectManagerView(project: project) }
+                        .tag(AppTab.project)
+                        .tabItem { Label("Projets", systemImage: "folder") }
+
+                    NavigationStack { ScannerView(project: project) }
+                        .tag(AppTab.scan)
+                        .tabItem { Label("Scanner", systemImage: "sensor") }
+
+                    NavigationStack { ConfigurationView(project: project) }
+                        .tag(AppTab.design)
+                        .tabItem { Label("Concevoir", systemImage: "slider.horizontal.3") }
+
+                    NavigationStack { Model3DView(project: project) }
+                        .tag(AppTab.preview)
+                        .tabItem { Label("Vue 3D", systemImage: "cube.transparent") }
+
+                    NavigationStack { CutListView(project: project) }
+                        .tag(AppTab.workshop)
+                        .tabItem { Label("Atelier", systemImage: "list.bullet.rectangle") }
+                }
+            } else {
+                NavigationStack { ProjectManagerView(project: project) }
             }
-            .tag(AppTab.project)
-            .tabItem { Label("Projet", systemImage: "square.grid.2x2.fill") }
-
-            NavigationStack { ScannerView(project: project) }
-                .tag(AppTab.scan)
-                .tabItem { Label("Scanner", systemImage: "sensor") }
-
-            NavigationStack { ConfigurationView(project: project) }
-                .tag(AppTab.design)
-                .tabItem { Label("Concevoir", systemImage: "slider.horizontal.3") }
-
-            NavigationStack { Model3DView(project: project) }
-                .tag(AppTab.preview)
-                .tabItem { Label("Vue 3D", systemImage: "cube.transparent") }
-
-            NavigationStack { CutListView(project: project) }
-                .tag(AppTab.workshop)
-                .tabItem { Label("Atelier", systemImage: "list.bullet.rectangle") }
         }
+        .onChange(of: project.currentProjectID) { _, _ in selectedTab = .project }
         .tint(Color(red: 0.12, green: 0.42, blue: 0.38))
     }
 }
 
-private struct ProjectHomeView: View {
+private struct ProjectManagerView: View {
     @Bindable var project: ProjectModel
-    let startScan: () -> Void
-
-    private var nextStep: String {
-        if project.scanFileURL == nil { return "Scanner le coffre" }
-        if !project.measurementsConfirmed { return "Vérifier les dimensions" }
-        return "Contrôler l'aménagement en 3D"
-    }
+    @State private var isCreating = false
+    @State private var newProjectName = ""
+    @State private var projectToDelete: ProjectSummary?
+    @State private var showingDeleteConfirmation = false
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 22) {
-                HStack(alignment: .top) {
-                    VStack(alignment: .leading, spacing: 5) {
-                        Text("ATELIER MOBILE").font(.caption.weight(.bold)).tracking(1.5).foregroundStyle(.teal)
-                        Text("Ton projet").font(.largeTitle.weight(.bold))
-                        Text("Un coffre sur mesure, étape par étape.").foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    Image(systemName: "car.side.fill")
-                        .font(.title2).foregroundStyle(.teal)
-                        .frame(width: 48, height: 48)
-                        .background(.teal.opacity(0.12), in: RoundedRectangle(cornerRadius: 16))
+        List {
+            if project.projects.isEmpty {
+                ContentUnavailableView {
+                    Label("Aucun projet", systemImage: "car.side")
+                } description: {
+                    Text("Crée un projet pour commencer. Chaque véhicule et son aménagement seront enregistrés séparément.")
+                } actions: {
+                    Button("Créer un projet") { beginCreating() }
+                        .buttonStyle(.borderedProminent)
                 }
-
-                VStack(alignment: .leading, spacing: 16) {
-                    HStack {
-                        VStack(alignment: .leading, spacing: 5) {
-                            Text("AMÉNAGEMENT DE COFFRE").font(.caption.weight(.bold)).tracking(0.8).foregroundStyle(.white.opacity(0.72))
-                            Text(project.vehicleName.replacingOccurrences(of: "Nissan ", with: "")).font(.title2.weight(.bold)).foregroundStyle(.white)
-                            Text("Sièges arrière rabattus").font(.subheadline).foregroundStyle(.white.opacity(0.8))
+                .listRowBackground(Color.clear)
+            } else {
+                Section("Mes projets · \(project.projects.count)") {
+                    ForEach(project.projects) { item in
+                        Button {
+                            project.openProject(item.id)
+                        } label: {
+                            HStack(spacing: 12) {
+                                Image(systemName: project.currentProjectID == item.id ? "folder.fill" : "folder")
+                                    .font(.title2).foregroundStyle(.teal)
+                                    .frame(width: 42, height: 42)
+                                    .background(.teal.opacity(0.1), in: RoundedRectangle(cornerRadius: 12))
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(item.projectName).font(.headline).foregroundStyle(.primary)
+                                    Text(item.vehicleName.isEmpty ? "Véhicule à définir" : item.vehicleName)
+                                        .font(.subheadline).foregroundStyle(.secondary)
+                                    Text("Modifié le \(item.updatedAt.formatted(date: .abbreviated, time: .shortened))")
+                                        .font(.caption).foregroundStyle(.tertiary)
+                                }
+                                Spacer()
+                                if project.currentProjectID == item.id {
+                                    Image(systemName: "checkmark.circle.fill").foregroundStyle(.teal)
+                                }
+                            }
+                            .padding(.vertical, 5)
                         }
-                        Spacer()
-                        Image(systemName: "shippingbox.fill")
-                            .font(.system(size: 30)).foregroundStyle(.white)
-                            .frame(width: 62, height: 62).background(.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 18))
-                    }
-                    Divider().overlay(.white.opacity(0.2))
-                    HStack(spacing: 0) {
-                        ProjectMetric(title: "Largeur", value: project.width.millimetresText)
-                        Spacer()
-                        ProjectMetric(title: "Longueur", value: project.length.millimetresText)
-                        Spacer()
-                        ProjectMetric(title: "Panneau", value: project.thickness.millimetresText)
-                    }
-                }
-                .padding(20)
-                .background(LinearGradient(colors: [Color(red: 0.10, green: 0.37, blue: 0.34), Color(red: 0.08, green: 0.27, blue: 0.29)], startPoint: .topLeading, endPoint: .bottomTrailing), in: RoundedRectangle(cornerRadius: 26))
-
-                VStack(alignment: .leading, spacing: 14) {
-                    HStack {
-                        Text("PROCHAINE ÉTAPE").font(.caption.weight(.bold)).tracking(1).foregroundStyle(.secondary)
-                        Spacer()
-                        Text(project.scanFileURL == nil ? "1 / 5" : (project.measurementsConfirmed ? "4 / 5" : "2 / 5"))
-                            .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                    }
-                    Text(nextStep).font(.title3.weight(.bold))
-                    Text(project.scanFileURL == nil
-                         ? "Le scan LiDAR crée le relevé 3D de départ."
-                         : project.measurementsConfirmed
-                            ? "Vérifie que le meuble s'insère bien dans le véhicule."
-                            : "Le scan propose des cotes. Ajuste-les avant de passer aux panneaux.")
-                        .font(.subheadline).foregroundStyle(.secondary)
-
-                    Button(action: startScan) {
-                        HStack {
-                            Image(systemName: project.scanFileURL == nil ? "viewfinder" : "arrow.clockwise")
-                            Text(project.scanFileURL == nil ? "Démarrer le scan LiDAR" : "Refaire le scan")
-                            Spacer()
-                            Image(systemName: "arrow.right")
+                        .buttonStyle(.plain)
+                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                            Button(role: .destructive) {
+                                projectToDelete = item
+                                showingDeleteConfirmation = true
+                            } label: { Label("Supprimer", systemImage: "trash") }
                         }
-                        .font(.headline).padding(16)
-                        .foregroundStyle(.white)
-                        .background(Color(red: 0.12, green: 0.42, blue: 0.38), in: RoundedRectangle(cornerRadius: 16))
                     }
-                    .buttonStyle(.plain)
                 }
-                .padding(20)
-                .background(.background, in: RoundedRectangle(cornerRadius: 24))
-                .overlay(RoundedRectangle(cornerRadius: 24).stroke(.primary.opacity(0.07), lineWidth: 1))
-
-                if let scanDate = project.scanDate {
-                    HStack(spacing: 13) {
-                        Image(systemName: "checkmark.circle.fill").font(.title2).foregroundStyle(.teal)
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text("Maillage LiDAR enregistré").font(.subheadline.weight(.semibold))
-                            Text("\(scanDate.formatted(date: .abbreviated, time: .shortened)) · repère orienté depuis le seuil")
-                                .font(.caption).foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                    }
-                    .padding(16)
-                    .background(.teal.opacity(0.08), in: RoundedRectangle(cornerRadius: 18))
+                Section {
+                    Text("Les changements sont enregistrés automatiquement sur cet appareil. Utilise le bouton Enregistrer dans Concevoir pour forcer une sauvegarde.")
+                        .font(.footnote).foregroundStyle(.secondary)
                 }
-
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("TON PARCOURS").font(.caption.weight(.bold)).tracking(1).foregroundStyle(.secondary)
-                    WorkflowRow(number: "01", title: "Scanner", detail: "Relever l'intérieur au LiDAR", done: project.scanFileURL != nil)
-                    WorkflowRow(number: "02", title: "Mesurer", detail: "Confirmer largeur, longueur et hauteur", done: project.measurementsConfirmed)
-                    WorkflowRow(number: "03", title: "Configurer", detail: "Épaisseur et compartiments", done: project.measurementsConfirmed)
-                    WorkflowRow(number: "04", title: "Vérifier", detail: "Voir le meuble dans le scan 3D", done: false)
-                    WorkflowRow(number: "05", title: "Fabriquer", detail: "Liste de découpe et PDF coté", done: false, isLast: true)
-                }
-                .padding(20)
-                .background(.background, in: RoundedRectangle(cornerRadius: 24))
-                .overlay(RoundedRectangle(cornerRadius: 24).stroke(.primary.opacity(0.07), lineWidth: 1))
-
-                Text("Les dimensions issues du maillage sont des estimations. Contrôle-les dans le véhicule avant toute découpe.")
-                    .font(.caption).foregroundStyle(.secondary).padding(.horizontal, 4)
             }
-            .padding(20)
-            .frame(maxWidth: 760)
-            .frame(maxWidth: .infinity)
         }
-        .background(Color(uiColor: .secondarySystemBackground))
-        .navigationTitle("Projet")
-        .navigationBarTitleDisplayMode(.inline)
-    }
-}
-
-private struct ProjectMetric: View {
-    let title: String
-    let value: String
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(title).font(.caption).foregroundStyle(.white.opacity(0.7))
-            Text(value).font(.subheadline.weight(.bold).monospacedDigit()).foregroundStyle(.white)
+        .navigationTitle("Projets")
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button(action: beginCreating) { Label("Nouveau projet", systemImage: "plus") }
+            }
+        }
+        .sheet(isPresented: $isCreating) {
+            NavigationStack {
+                Form {
+                    Section("Nouveau projet") {
+                        TextField("Nom du projet", text: $newProjectName)
+                            .textInputAutocapitalization(.words)
+                    }
+                    Section {
+                        Text("Le véhicule, le scan LiDAR, les repères et les choix d’aménagement seront propres à ce projet.")
+                            .font(.footnote).foregroundStyle(.secondary)
+                    }
+                }
+                .navigationTitle("Créer un projet")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Annuler") { isCreating = false }
+                    }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Créer") {
+                            project.createProject(named: newProjectName)
+                            isCreating = false
+                        }
+                        .disabled(newProjectName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    }
+                }
+            }
+            .presentationDetents([.medium])
+        }
+        .confirmationDialog(
+            "Supprimer « \(projectToDelete?.projectName ?? "ce projet") » ?",
+            isPresented: $showingDeleteConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Supprimer le projet et son scan", role: .destructive) {
+                if let projectToDelete { project.deleteProject(projectToDelete.id) }
+                projectToDelete = nil
+            }
+            Button("Annuler", role: .cancel) { projectToDelete = nil }
+        } message: {
+            Text("Cette action supprime le projet enregistré sur cet appareil ainsi que son maillage LiDAR associé.")
         }
     }
-}
 
-private struct WorkflowRow: View {
-    let number: String
-    let title: String
-    let detail: String
-    let done: Bool
-    var isLast = false
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            VStack(spacing: 0) {
-                ZStack {
-                    Circle().fill(done ? Color.teal : Color(uiColor: .tertiarySystemFill)).frame(width: 30, height: 30)
-                    if done {
-                        Image(systemName: "checkmark").font(.caption.weight(.bold)).foregroundStyle(.white)
-                    } else {
-                        Text(number).font(.caption2.weight(.bold)).foregroundStyle(.secondary)
-                    }
-                }
-                if !isLast { Rectangle().fill(.primary.opacity(0.08)).frame(width: 2, height: 20) }
-            }
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(.subheadline.weight(.semibold))
-                Text(detail).font(.caption).foregroundStyle(.secondary)
-            }
-            .padding(.top, 4)
-            Spacer()
-        }
-        .fixedSize(horizontal: false, vertical: true)
+    private func beginCreating() {
+        newProjectName = ""
+        isCreating = true
     }
 }
 
@@ -206,9 +163,13 @@ private struct ConfigurationView: View {
     @Bindable var project: ProjectModel
     @State private var isProposing = false
     @State private var proposalMessage: String?
+    @State private var isShowingSavedNotice = false
 
     var body: some View {
         Form {
+            Section("Projet") {
+                TextField("Nom du projet", text: $project.projectName)
+            }
             Section("Véhicule") {
                 TextField("Modèle", text: $project.vehicleName)
                 Toggle("Sièges arrière rabattus", isOn: $project.seatsFolded)
@@ -306,6 +267,21 @@ private struct ConfigurationView: View {
             }
         }
         .navigationTitle("Concevoir")
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    project.saveCurrentProject()
+                    isShowingSavedNotice = true
+                } label: {
+                    Label("Enregistrer", systemImage: "square.and.arrow.down")
+                }
+            }
+        }
+        .alert("Projet enregistré", isPresented: $isShowingSavedNotice) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text("Les modifications de « \(project.projectName) » sont enregistrées sur cet appareil.")
+        }
     }
 
     @MainActor
