@@ -40,6 +40,26 @@ struct ContentView: View {
             }
         }
         .onChange(of: project.currentProjectID) { _, _ in selectedTab = .project }
+        .overlay(alignment: .top) {
+            if project.isSaving || project.saveError != nil {
+                HStack(spacing: 10) {
+                    if project.isSaving {
+                        ProgressView().controlSize(.small)
+                        Text("Enregistrement du projet…")
+                    } else {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                        Text("Sauvegarde impossible : \(project.saveError ?? "erreur inconnue")")
+                    }
+                }
+                .font(.subheadline.weight(.medium))
+                .padding(.horizontal, 16).padding(.vertical, 11)
+                .background(.regularMaterial, in: Capsule())
+                .shadow(color: .black.opacity(0.12), radius: 10, y: 4)
+                .padding(.top, 8)
+                .transition(.move(edge: .top).combined(with: .opacity))
+            }
+        }
+        .animation(.easeInOut(duration: 0.2), value: project.isSaving)
         .tint(Color(red: 0.12, green: 0.42, blue: 0.38))
     }
 }

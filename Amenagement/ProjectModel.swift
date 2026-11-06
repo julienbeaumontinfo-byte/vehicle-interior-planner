@@ -28,6 +28,11 @@ final class ProjectModel {
     var scanQuality: ScanQuality? { didSet { persist() } }
     private var savedProjects: [SavedProject] = []
     private var isHydrating = false
+    private let persistenceQueue = DispatchQueue(label: "fr.atelier.amenagement.persistence", qos: .utility)
+    private var pendingArchiveWrite: DispatchWorkItem?
+    private var latestWriteID = UUID()
+    private(set) var isSaving = false
+    private(set) var saveError: String?
 
     init() {
         if let data = try? Data(contentsOf: Self.archiveFile),
@@ -261,9 +266,28 @@ final class ProjectModel {
     }
 
     private func writeArchive() {
-        let data = ProjectArchive(projects: savedProjects, activeProjectID: currentProjectID)
-        guard let encoded = try? JSONEncoder().encode(data) else { return }
-        try? encoded.write(to: Self.archiveFile, options: .atomic)
+        let archive = ProjectArchive(projects: savedProjects, activeProjectID: currentProjectID)
+        let destination = Self.archiveFile
+        let writeID = UUID()
+        latestWriteID = writeID
+        pendingArchiveWrite?.cancel()
+        isSaving = true
+        saveError = nil
+        let work = DispatchWorkItem { [weak self] in
+            let result: Result<Void, Error> = Result {
+                let encoded = try JSONEncoder().encode(archive)
+                try encoded.write(to: destination, options: .atomic)
+            }
+            DispatchQueue.main.async {
+                guard let self, self.latestWriteID == writeID else { return }
+                self.isSaving = false
+                if case .failure(let error) = result {
+                    self.saveError = error.localizedDescription
+                }
+            }
+        }
+        pendingArchiveWrite = work
+        persistenceQueue.asyncAfter(deadline: .now() + .milliseconds(150), execute: work)
     }
 
     private func clearLegacyExampleStore() {
