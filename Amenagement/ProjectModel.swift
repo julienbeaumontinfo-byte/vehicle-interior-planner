@@ -60,6 +60,10 @@ final class ProjectModel {
             scanFileURL: nil, scanBounds: nil, scanDate: nil, measurementsConfirmed: false,
             scanMeasurements: [:], openings: [], vehicleLandmarks: [], scanQuality: nil)
         savedProjects.append(record)
+        // Publish the new row before switching the active project. Hydration is
+        // intentionally suppressed from autosaving and must not be relied on to
+        // refresh the project list.
+        projects = savedProjects.map(ProjectSummary.init)
         currentProjectID = record.id
         hydrate(record)
         writeArchive()
