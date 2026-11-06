@@ -1,0 +1,23 @@
+name: Amenagement
+options:
+  bundleIdPrefix: fr.atelier
+  deploymentTarget:
+    iOS: "17.0"
+targets:
+  Amenagement:
+    type: application
+    platform: iOS
+    sources:
+      - path: Amenagement
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: fr.atelier.amenagement
+        PRODUCT_NAME: Amenagement
+        SWIFT_VERSION: 5.0
+        GENERATE_INFOPLIST_FILE: YES
+        TARGETED_DEVICE_FAMILY: "1,2"
+        INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
+        INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents: YES
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription: "Non utilisé dans cette version prototype."
+        INFOPLIST_KEY_NSCameraUsageDescription: "La caméra et le LiDAR servent à scanner l'intérieur du véhicule."

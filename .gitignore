@@ -1,0 +1,17 @@
+# Xcode build products and local state
+DerivedData/
+build/
+work/
+*.xcuserstate
+xcuserdata/
+
+# macOS metadata
+.DS_Store
+._*
+
+# Signing and local secrets
+*.p12
+*.mobileprovision
+.env
+.env.*
+Secrets.plist
